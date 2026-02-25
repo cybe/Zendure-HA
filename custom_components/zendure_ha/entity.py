@@ -19,7 +19,6 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 CONST_FACTOR = 2
-CONST_TEMPLATE_FIELDS = ["state", "availability", "icon", "picture", "attributes", "source", "entity_id", "entity_ids"]
 
 
 class EntityZendure(Entity):
@@ -189,7 +188,7 @@ class EntityDevice:
                         entity_registry.async_update_entity(entity.entity_id, new_unique_id=unique_id, new_entity_id=entityid, translation_key=uniqueid)
 
                     _LOGGER.debug("Updated entity %s unique_id to %s", entity.entity_id, uniqueid)
-                changes.append((entity.entity_id, entityid))
+                    changes.append((entity.entity_id, entityid))
             except Exception as e:
                 entity_registry.async_remove(entity.entity_id)
                 _LOGGER.error("Failed to update entity %s: %s", entity.entity_id, e)
@@ -201,19 +200,31 @@ class EntityDevice:
             new_options = dict(entry.options or {})
             if len(new_data) == 0 and len(new_options) == 0:
                 continue
+
+            def change_id(data: dict, oid: str, nid: str) -> bool:
+                changed = False
+                for key, value in data.items():
+                    if isinstance(value, dict):
+                        change_id(value, oid, nid)
+                        changed = True
+                    elif isinstance(value, list):
+                        for i, item in enumerate(value):
+                            if isinstance(item, str) and oid in item:
+                                value[i] = item.replace(oid, nid)
+                                changed = True
+                    elif isinstance(value, str) and oid in value:
+                        data[key] = data[key] = value.replace(oid, nid)
+                        changed = True
+                return changed
+
             changed = False
             for oid, nid in changes:
-                for key in CONST_TEMPLATE_FIELDS:
-                    if (data := new_data.get(key)) is not None and isinstance(data, str) and oid in data:
-                        new_data[key] = data.replace(oid, nid)
-                        changed = True
-                    if (data := new_options.get(key)) is not None and isinstance(data, str) and oid in data:
-                        new_options[key] = data.replace(oid, nid)
-                        changed = True
+                changed |= change_id(new_data, oid, nid)
+                changed |= change_id(new_options, oid, nid)
 
             if changed:
                 hass.config_entries.async_update_entry(entry, data=new_data, options=new_options)
-                hass.async_create_task( hass.config_entries.async_reload(entry.entry_id) )
+                hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
                 modified += 1
         _LOGGER.info("Modified %i template entities", modified)
 
